@@ -104,8 +104,9 @@ jobs:
             echo "S3_BUCKET=${{ vars.S3_BUCKET }}"
           fi
           if [ -z "${{ vars.VITE_API_URL }}" ]; then
-            echo "Missing GitHub Variable: VITE_API_URL"
-            missing=1
+            echo "VITE_API_URL is not set; frontend will keep the local API fallback until you add it"
+          else
+            echo "VITE_API_URL=${{ vars.VITE_API_URL }}"
           fi
           if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
             echo "Missing GitHub Secrets: AWS_ACCESS_KEY_ID and/or AWS_SECRET_ACCESS_KEY"
@@ -171,6 +172,19 @@ jobs:
             missing=1
           fi
           exit "$missing"
+
+      - name: Prepare EC2 app directory
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            sudo mkdir -p /opt/sms
+            sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/sms
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip curl
 
       - name: Copy backend to EC2
         uses: appleboy/scp-action@v0.1.7
