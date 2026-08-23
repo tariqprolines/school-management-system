@@ -7,7 +7,6 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/sms
-EnvironmentFile=/opt/sms/.env
 ExecStart=/opt/sms/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5

@@ -229,40 +229,41 @@ jobs:
             test -f /opt/sms/requirements.txt
             cd /opt/sms
 
-            cat > .env << 'ENVEOF'
-            APP_NAME=School Management System
-            DEBUG=false
-            ALGORITHM=HS256
-            ACCESS_TOKEN_EXPIRE_MINUTES=120
-            DB_SCHEMA=public
-            ENVEOF
             DB_URL='${{ secrets.DATABASE_URL }}'
             case "$DB_URL" in
               postgresql+asyncpg://*) ;;
               postgresql://*) DB_URL="postgresql+asyncpg://${DB_URL#postgresql://}" ;;
               postgres://*) DB_URL="postgresql+asyncpg://${DB_URL#postgres://}" ;;
             esac
-            echo "DATABASE_URL=$DB_URL" >> .env
-            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
-            echo "API_ACCESS_TOKEN=${{ secrets.API_ACCESS_TOKEN }}" >> .env
-            echo "CORS_ORIGINS=${{ vars.CORS_ORIGINS }}" >> .env
+
+            printf '%s\n' \
+              "APP_NAME=School Management System" \
+              "DEBUG=false" \
+              "ALGORITHM=HS256" \
+              "ACCESS_TOKEN_EXPIRE_MINUTES=120" \
+              "DB_SCHEMA=public" \
+              "DATABASE_URL=${DB_URL}" \
+              "SECRET_KEY=${{ secrets.SECRET_KEY }}" \
+              "API_ACCESS_TOKEN=${{ secrets.API_ACCESS_TOKEN }}" \
+              "CORS_ORIGINS=${{ vars.CORS_ORIGINS }}" \
+              > .env
 
             python3 -m venv venv
-            # shellcheck disable=SC1091
             . venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            UNIT_FILE=$(find /tmp -name 'sms-api.service' | head -n 1)
+            UNIT_FILE=$(find /tmp -name 'sms-api.service' | head -n 1 || true)
             if [ -z "$UNIT_FILE" ]; then
               echo "sms-api.service was not uploaded to /tmp"
               find /tmp -maxdepth 4 -type f | head
               exit 1
             fi
-            sudo mv "$UNIT_FILE" /etc/systemd/system/sms-api.service
+            echo "Using unit file: $UNIT_FILE"
+            sudo cp "$UNIT_FILE" /etc/systemd/system/sms-api.service
             sudo systemctl daemon-reload
             sudo systemctl enable sms-api
-            sudo systemctl restart sms-api
+            sudo systemctl restart sms-api || true
 
             ok=0
             for i in $(seq 1 20); do
@@ -272,12 +273,14 @@ jobs:
                 ok=1
                 break
               fi
+              echo "Waiting for API... ($i/20)"
               sleep 3
             done
             if [ "$ok" -ne 1 ]; then
               echo "API failed to become healthy"
               sudo systemctl status sms-api --no-pager || true
-              sudo journalctl -u sms-api -n 80 --no-pager || true
+              sudo journalctl -u sms-api -n 120 --no-pager || true
+              ./venv/bin/python -c "from app.main import app; print('import ok', app.title)" || true
               exit 1
             fi
 

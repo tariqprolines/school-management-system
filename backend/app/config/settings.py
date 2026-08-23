@@ -10,8 +10,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     API_ACCESS_TOKEN: str = "7f84d91d8c214fc9b12c6dfe3c4d4b1a"
-    # DATABASE_URL: str = "postgresql+asyncpg://sms_user:sms_password@localhost:5433/sms_db"
-    DATABASE_URL: str = "ostgresql+asyncpg://postgres:root@127.0.0.1/sms_db"
+    DATABASE_URL: str = "postgresql+asyncpg://sms_user:sms_password@localhost:5432/sms_db"
     DB_SCHEMA: str = "public"
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
