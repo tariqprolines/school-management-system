@@ -94,12 +94,34 @@ jobs:
           npm ci
           npm run build
 
+      - name: Check frontend deploy config
+        run: |
+          missing=0
+          if [ -z "${{ vars.S3_BUCKET }}" ]; then
+            echo "Missing GitHub Variable: S3_BUCKET (Settings → Variables → Actions)"
+            missing=1
+          else
+            echo "S3_BUCKET=${{ vars.S3_BUCKET }}"
+          fi
+          if [ -z "${{ vars.VITE_API_URL }}" ]; then
+            echo "Missing GitHub Variable: VITE_API_URL"
+            missing=1
+          fi
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "Missing GitHub Secrets: AWS_ACCESS_KEY_ID and/or AWS_SECRET_ACCESS_KEY"
+            missing=1
+          fi
+          exit "$missing"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify S3 bucket access
+        run: aws s3 ls "s3://${{ vars.S3_BUCKET }}/"
 
       - name: Sync to S3
         run: |
@@ -128,6 +150,27 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check backend deploy config
+        run: |
+          missing=0
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "Missing GitHub Secret: EC2_HOST (EC2 public IP or DNS)"
+            missing=1
+          fi
+          if [ -z "${{ secrets.EC2_USER }}" ]; then
+            echo "Missing GitHub Secret: EC2_USER (usually ubuntu)"
+            missing=1
+          fi
+          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
+            echo "Missing GitHub Secret: EC2_SSH_KEY (full private PEM, including BEGIN/END lines)"
+            missing=1
+          fi
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "Missing GitHub Secret: DATABASE_URL (RDS connection string)"
+            missing=1
+          fi
+          exit "$missing"
 
       - name: Copy backend to EC2
         uses: appleboy/scp-action@v0.1.7
