@@ -204,6 +204,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "infra/ec2/sms-api.service"
           target: "/tmp"
+          strip_components: 2
 
       - name: Install deps and restart API
         uses: appleboy/ssh-action@v1.2.0
@@ -211,19 +212,23 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
           script: |
-            set -e
+            set -euo pipefail
             sudo mkdir -p /opt/sms
             if [ -d /tmp/sms-upload/backend ]; then
               SRC=/tmp/sms-upload/backend/
             else
               SRC=/tmp/sms-upload/
             fi
+            echo "Using upload source: $SRC"
+            ls -la "$SRC"
             sudo rsync -a --delete --exclude venv --exclude .env "$SRC" /opt/sms/
             sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/sms
+            test -f /opt/sms/app/main.py
+            test -f /opt/sms/requirements.txt
             cd /opt/sms
 
-            # Write runtime config (never commit .env to git)
             cat > .env << 'ENVEOF'
             APP_NAME=School Management System
             DEBUG=false
@@ -231,22 +236,50 @@ jobs:
             ACCESS_TOKEN_EXPIRE_MINUTES=120
             DB_SCHEMA=public
             ENVEOF
-            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+            DB_URL='${{ secrets.DATABASE_URL }}'
+            case "$DB_URL" in
+              postgresql+asyncpg://*) ;;
+              postgresql://*) DB_URL="postgresql+asyncpg://${DB_URL#postgresql://}" ;;
+              postgres://*) DB_URL="postgresql+asyncpg://${DB_URL#postgres://}" ;;
+            esac
+            echo "DATABASE_URL=$DB_URL" >> .env
             echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
             echo "API_ACCESS_TOKEN=${{ secrets.API_ACCESS_TOKEN }}" >> .env
             echo "CORS_ORIGINS=${{ vars.CORS_ORIGINS }}" >> .env
 
             python3 -m venv venv
-            source venv/bin/activate
+            # shellcheck disable=SC1091
+            . venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            sudo mv /tmp/sms-api.service /etc/systemd/system/sms-api.service
+            UNIT_FILE=$(find /tmp -name 'sms-api.service' | head -n 1)
+            if [ -z "$UNIT_FILE" ]; then
+              echo "sms-api.service was not uploaded to /tmp"
+              find /tmp -maxdepth 4 -type f | head
+              exit 1
+            fi
+            sudo mv "$UNIT_FILE" /etc/systemd/system/sms-api.service
             sudo systemctl daemon-reload
             sudo systemctl enable sms-api
             sudo systemctl restart sms-api
-            sleep 3
-            curl -sf http://127.0.0.1:8000/health
+
+            ok=0
+            for i in $(seq 1 20); do
+              if curl -sf http://127.0.0.1:8000/health; then
+                echo
+                echo "API is healthy"
+                ok=1
+                break
+              fi
+              sleep 3
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "API failed to become healthy"
+              sudo systemctl status sms-api --no-pager || true
+              sudo journalctl -u sms-api -n 80 --no-pager || true
+              exit 1
+            fi
 
       - name: Deployment summary
         run: |
