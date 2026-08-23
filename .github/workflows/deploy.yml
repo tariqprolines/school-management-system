@@ -1,0 +1,190 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: sms_user
+          POSTGRES_PASSWORD: sms_password
+          POSTGRES_DB: sms_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sms_user -d sms_test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://sms_user:sms_password@localhost:5432/sms_test_db
+      SECRET_KEY: ci-test-secret-key
+      API_ACCESS_TOKEN: ci-test-api-access-token
+      CORS_ORIGINS: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pytest tests/ -v --tb=short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend build
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_API_ACCESS_TOKEN: ${{ secrets.API_ACCESS_TOKEN }}
+        run: |
+          npm ci
+          npm run build
+
+  deploy-frontend:
+    name: Frontend → S3 + CloudFront
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build React app
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_API_ACCESS_TOKEN: ${{ secrets.API_ACCESS_TOKEN }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ vars.S3_BUCKET }}/ \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html" \
+            --exclude "*.html"
+          aws s3 sync frontend/dist/ s3://${{ vars.S3_BUCKET }}/ \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --exclude "*" \
+            --include "*.html"
+
+      - name: Invalidate CloudFront cache
+        if: vars.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+  deploy-backend:
+    name: Backend → EC2
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy backend to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "backend/"
+          target: "/opt/sms"
+          strip_components: 1
+          rm: true
+
+      - name: Copy systemd unit
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "infra/ec2/sms-api.service"
+          target: "/tmp"
+
+      - name: Install deps and restart API
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/sms
+
+            # Write runtime config (never commit .env to git)
+            cat > .env << 'ENVEOF'
+            APP_NAME=School Management System
+            DEBUG=false
+            ALGORITHM=HS256
+            ACCESS_TOKEN_EXPIRE_MINUTES=120
+            DB_SCHEMA=public
+            ENVEOF
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+            echo "API_ACCESS_TOKEN=${{ secrets.API_ACCESS_TOKEN }}" >> .env
+            echo "CORS_ORIGINS=${{ vars.CORS_ORIGINS }}" >> .env
+
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            sudo mv /tmp/sms-api.service /etc/systemd/system/sms-api.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable sms-api
+            sudo systemctl restart sms-api
+            sleep 3
+            curl -sf http://127.0.0.1:8000/health
+
+      - name: Deployment summary
+        run: |
+          echo "## Backend deployed to EC2" >> $GITHUB_STEP_SUMMARY
+          echo "Host: \`${{ secrets.EC2_HOST }}\`" >> $GITHUB_STEP_SUMMARY

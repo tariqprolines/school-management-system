@@ -105,6 +105,23 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
+## CI/CD (GitHub Actions → AWS)
+
+Simple deployment — **no Docker**:
+
+| Component | Target |
+|-----------|--------|
+| React + Vite | **S3 + CloudFront** |
+| FastAPI | **EC2** (systemd + uvicorn) |
+| PostgreSQL | **RDS** |
+
+| Workflow | File | Trigger |
+|----------|------|---------|
+| **CI** | `.github/workflows/ci.yml` | PR / push |
+| **Deploy** | `.github/workflows/deploy.yml` | Push to `main` |
+
+Setup guide: [infra/aws/README.md](infra/aws/README.md)
+
 ## Project Structure
 
 ```

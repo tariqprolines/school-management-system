@@ -1,0 +1,16 @@
+[Unit]
+Description=School Management System API (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sms
+EnvironmentFile=/opt/sms/.env
+ExecStart=/opt/sms/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
