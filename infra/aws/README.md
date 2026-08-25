@@ -1,4 +1,4 @@
-# Simple AWS Deployment (No Docker)
+# Simple AWS Deployment
 
 ```
 GitHub → git push → GitHub Actions
@@ -84,7 +84,7 @@ postgresql+asyncpg://USER:PASSWORD@your-rds.xxx.rds.amazonaws.com:5432/sms_db
 ### Manual deploy
 **Actions → Deploy to AWS → Run workflow**
 
-## 4. Local development (no Docker)
+## 4. Local development
 
 ```bash
 # Backend

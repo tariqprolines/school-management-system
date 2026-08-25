@@ -19,29 +19,17 @@ jobs:
     name: Run tests
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: sms_user
-          POSTGRES_PASSWORD: sms_password
-          POSTGRES_DB: sms_test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sms_user -d sms_test_db"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     env:
-      DATABASE_URL: postgresql+asyncpg://sms_user:sms_password@localhost:5432/sms_test_db
+      DATABASE_URL: postgresql+asyncpg://sms_user:sms_password@127.0.0.1:5432/sms_test_db
       SECRET_KEY: ci-test-secret-key
       API_ACCESS_TOKEN: ci-test-api-access-token
       CORS_ORIGINS: http://localhost:5173
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install and start PostgreSQL
+        run: bash .github/scripts/setup-postgres.sh
 
       - uses: actions/setup-python@v5
         with:

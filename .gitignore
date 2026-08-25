@@ -17,9 +17,6 @@ dist/
 .vscode/
 *.swp
 
-# Docker
-sms_postgres_data/
-
 # OS
 .DS_Store
 Thumbs.db

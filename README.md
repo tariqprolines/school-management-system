@@ -21,19 +21,35 @@ Industry-grade School Management System (SMS) built with **React**, **FastAPI**,
 | Database | PostgreSQL 15 |
 | Auth | JWT + API Key (X-Access-Token) |
 
-## Quick Start with Docker
+## Local Development
 
-```bash
-# Clone and start all services
-docker compose up --build
+Run PostgreSQL 15 locally, then start the API and SPA.
 
-# Access:
-# Frontend: http://localhost:5173
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
-```
+**Access:** Frontend http://localhost:5173 · API http://localhost:8000 · Docs http://localhost:8000/docs
 
 **Default login:** `admin@school.com` / `admin123`
+
+### Backend
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+
+# Start local PostgreSQL, then:
+uvicorn app.main:app --reload --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
+```
 
 ### Demo accounts (all roles)
 
@@ -49,30 +65,6 @@ Seeded automatically on backend startup. Password is `demo123` for all except Su
 | Student | student@school.com | demo123 | Student Portal |
 
 The demo teacher has a linked teacher profile; the demo student has a linked student record and guardian (`parent@school.com`).
-
-## Local Development (without Docker)
-
-### Backend
-
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-
-# Start PostgreSQL on port 5433 (or update DATABASE_URL)
-uvicorn app.main:app --reload --port 8000
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-cp .env.example .env
-npm run dev
-```
 
 ## API Overview
 
@@ -107,7 +99,7 @@ pytest tests/ -v
 
 ## CI/CD (GitHub Actions → AWS)
 
-Simple deployment — **no Docker**:
+Simple deployment:
 
 | Component | Target |
 |-----------|--------|
@@ -138,7 +130,7 @@ school-management-system/
 │       ├── pages/         # Route pages
 │       ├── components/    # UI components
 │       └── redux/         # State management
-└── docker-compose.yml
+└── infra/            # AWS / EC2 deploy scripts
 ```
 
 ## Phase 2 (Planned)
