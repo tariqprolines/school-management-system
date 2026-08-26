@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "School Management System"
     DEBUG: bool = True
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     API_ACCESS_TOKEN: str = "7f84d91d8c214fc9b12c6dfe3c4d4b1a"
