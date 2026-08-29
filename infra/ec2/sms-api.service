@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/opt/sms
-ExecStart=/opt/sms/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+WorkingDirectory=/var/www/html/school-management-system/backend
+ExecStart=/var/www/html/school-management-system/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 

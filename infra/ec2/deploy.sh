@@ -3,47 +3,30 @@
 set -euo pipefail
 
 STAGING="/tmp/sms-staging"
+APP_ROOT="/var/www/html/school-management-system"
 BACKEND_SRC="${STAGING}/backend"
+BACKEND_DEST="${APP_ROOT}/backend"
+FRONTEND_SRC="${STAGING}/frontend"
+FRONTEND_DEST="${APP_ROOT}/frontend"
+DEPLOY_USER="${SUDO_USER:-ubuntu}"
 
-resolve_frontend_src() {
-  local candidate
-  for candidate in \
-    "${STAGING}/frontend/dist" \
-    "${STAGING}/frontend" \
-    "${STAGING}/dist"; do
-    if [ -f "${candidate}/index.html" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-
-  candidate="$(find "$STAGING" -type f -name index.html 2>/dev/null | head -n 1 || true)"
-  if [ -n "$candidate" ]; then
-    dirname "$candidate"
-    return 0
-  fi
-
-  echo "Frontend build not found under ${STAGING}. Contents:" >&2
-  find "$STAGING" -maxdepth 4 -type f 2>/dev/null | head -n 40 >&2 || true
-  return 1
-}
-
-FRONTEND_SRC="$(resolve_frontend_src)" || exit 1
-
-for path in "$BACKEND_SRC" "$FRONTEND_SRC" "${STAGING}/infra/ec2/sms-api.service"; do
+for path in "$BACKEND_SRC" "${FRONTEND_SRC}/dist/index.html" "${STAGING}/infra/ec2/sms-api.service"; do
   if [ ! -e "$path" ]; then
     echo "Missing upload: $path"
+    find "$STAGING" -maxdepth 4 -type f 2>/dev/null | head -n 40 || true
     exit 1
   fi
 done
 
-sudo mkdir -p /opt/sms /var/www/sms
-sudo rsync -a --delete --exclude venv --exclude .env "$BACKEND_SRC/" /opt/sms/
-sudo rsync -a --delete "$FRONTEND_SRC/" /var/www/sms/
-DEPLOY_USER="${SUDO_USER:-ubuntu}"
-sudo chown -R "$DEPLOY_USER:$DEPLOY_USER" /opt/sms /var/www/sms
+sudo mkdir -p "$BACKEND_DEST" "$FRONTEND_DEST"
+sudo rsync -a --delete --exclude venv --exclude .env --exclude __pycache__ "$BACKEND_SRC/" "$BACKEND_DEST/"
+sudo rsync -a --delete --exclude node_modules "$FRONTEND_SRC/" "$FRONTEND_DEST/"
+sudo chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT"
 
-cd /opt/sms
+# Remove legacy deploy paths from the old CI/CD layout
+sudo rm -rf /opt/sms /var/www/sms
+
+cd "$BACKEND_DEST"
 
 DB_URL="${DATABASE_URL:?DATABASE_URL is required}"
 case "$DB_URL" in
@@ -84,7 +67,9 @@ sudo systemctl reload nginx
 
 for i in $(seq 1 20); do
   if curl -sf http://127.0.0.1:8000/health >/dev/null; then
-    echo "API healthy"
+    echo "Deploy complete"
+    echo "  Backend:  ${BACKEND_DEST}"
+    echo "  Frontend: ${FRONTEND_DEST} (nginx serves ${FRONTEND_DEST}/dist)"
     exit 0
   fi
   echo "Waiting for API... ($i/20)"

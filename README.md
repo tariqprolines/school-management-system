@@ -99,12 +99,12 @@ pytest tests/ -v
 
 ## CI/CD (GitHub Actions → EC2)
 
-Both frontend and backend deploy to the same EC2 instance (nginx + systemd).
+Both frontend and backend deploy to `/var/www/html/school-management-system/` on EC2.
 
-| Component | Target |
-|-----------|--------|
-| React + Vite | **EC2** `/var/www/sms` (nginx static) |
-| FastAPI | **EC2** `/opt/sms` (systemd + uvicorn) |
+| Component | Path on EC2 |
+|-----------|---------------|
+| Backend | `/var/www/html/school-management-system/backend` |
+| Frontend | `/var/www/html/school-management-system/frontend` (nginx serves `frontend/dist`) |
 | PostgreSQL | **RDS** or local Postgres |
 
 | Workflow | File | Trigger |

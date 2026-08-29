@@ -9,13 +9,21 @@ GitHub push to main
         │
         ▼
       EC2
-  ┌─────┴─────┐
-  │   nginx   │  :80  → /var/www/sms (React)
-  │           │  /api → uvicorn :8000 (FastAPI)
-  └─────┬─────┘
-        ▼
-   PostgreSQL (RDS or local)
+  /var/www/html/school-management-system/
+  ├── backend/   → FastAPI (systemd + uvicorn :8000)
+  └── frontend/  → React source + dist/
+                   nginx serves frontend/dist on :80
 ```
+
+## Deploy paths on EC2
+
+| Component | Path |
+|-----------|------|
+| Backend | `/var/www/html/school-management-system/backend` |
+| Frontend source | `/var/www/html/school-management-system/frontend` |
+| Frontend (browser) | `/var/www/html/school-management-system/frontend/dist` |
+
+Legacy paths `/opt/sms` and `/var/www/sms` are removed on each deploy.
 
 ## 1. One-time EC2 setup
 
@@ -49,11 +57,11 @@ sudo certbot --nginx -d your-domain.com
 | `VITE_API_URL` | `http://YOUR_EC2_IP/api/v1` or `https://your-domain.com/api/v1` |
 | `CORS_ORIGINS` | `http://YOUR_EC2_IP` or `https://your-domain.com` |
 
-## 4. Workflows
+## 4. Workflow
 
 | File | When | What |
 |------|------|------|
-| `deploy.yml` | Push to `main` | Test → SSH deploy to EC2 |
+| `deploy.yml` | Push to `main` | Test → sync to EC2 paths above |
 
 Manual deploy: **Actions → Deploy → Run workflow**
 
@@ -61,5 +69,5 @@ Manual deploy: **Actions → Deploy → Run workflow**
 
 - [ ] `http://YOUR_EC2_IP/` loads the login page
 - [ ] `http://YOUR_EC2_IP/health` returns `{"status":"healthy",...}`
+- [ ] `frontend/src/pages/LoginPage.tsx` on EC2 matches GitHub `main`
 - [ ] `CORS_ORIGINS` matches the URL users open in the browser
-- [ ] `VITE_API_URL` uses the same host with `/api/v1` path
