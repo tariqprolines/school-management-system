@@ -4,11 +4,31 @@ set -euo pipefail
 
 STAGING="/tmp/sms-staging"
 BACKEND_SRC="${STAGING}/backend"
-FRONTEND_SRC="${STAGING}/frontend/dist"
 
-if [ ! -d "$FRONTEND_SRC" ] && [ -f "${STAGING}/frontend/index.html" ]; then
-  FRONTEND_SRC="${STAGING}/frontend"
-fi
+resolve_frontend_src() {
+  local candidate
+  for candidate in \
+    "${STAGING}/frontend/dist" \
+    "${STAGING}/frontend" \
+    "${STAGING}/dist"; do
+    if [ -f "${candidate}/index.html" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  candidate="$(find "$STAGING" -type f -name index.html 2>/dev/null | head -n 1 || true)"
+  if [ -n "$candidate" ]; then
+    dirname "$candidate"
+    return 0
+  fi
+
+  echo "Frontend build not found under ${STAGING}. Contents:" >&2
+  find "$STAGING" -maxdepth 4 -type f 2>/dev/null | head -n 40 >&2 || true
+  return 1
+}
+
+FRONTEND_SRC="$(resolve_frontend_src)" || exit 1
 
 for path in "$BACKEND_SRC" "$FRONTEND_SRC" "${STAGING}/infra/ec2/sms-api.service"; do
   if [ ! -e "$path" ]; then
