@@ -20,8 +20,15 @@ done
 
 sudo mkdir -p "$BACKEND_DEST" "$FRONTEND_DEST"
 sudo rsync -a --delete --exclude venv --exclude .env --exclude __pycache__ "$BACKEND_SRC/" "$BACKEND_DEST/"
-sudo rsync -a --delete --exclude node_modules "$FRONTEND_SRC/" "$FRONTEND_DEST/"
+sudo rsync -a --delete --exclude node_modules --exclude .env --exclude '.env.*' "$FRONTEND_SRC/" "$FRONTEND_DEST/"
 sudo chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT"
+
+# Restore frontend .env for local dev/rebuilds on EC2 (not used by nginx-served dist)
+printf '%s\n' \
+  "VITE_API_URL=${VITE_API_URL:-http://localhost/api/v1}" \
+  "VITE_API_ACCESS_TOKEN=${API_ACCESS_TOKEN:?API_ACCESS_TOKEN is required}" \
+  > "${FRONTEND_DEST}/.env"
+sudo chown "$DEPLOY_USER:$DEPLOY_USER" "${FRONTEND_DEST}/.env"
 
 # Remove legacy deploy paths from the old CI/CD layout
 sudo rm -rf /opt/sms /var/www/sms
