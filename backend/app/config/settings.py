@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     API_ACCESS_TOKEN: str = "7f84d91d8c214fc9b12c6dfe3c4d4b1a"
     DATABASE_URL: str = "postgresql+asyncpg://sms_user:sms_password@localhost:5432/sms_db"
     DB_SCHEMA: str = "public"
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://35.172.225.151:5173"
 
     @property
     def cors_origins_list(self) -> list[str]:

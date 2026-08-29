@@ -1,4 +1,4 @@
-name: Deploy to AWS
+name: Deploy
 
 on:
   push:
@@ -10,25 +10,21 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  NODE_VERSION: "20"
   PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  DATABASE_URL: postgresql+asyncpg://sms_user:sms_password@127.0.0.1:5432/sms_test_db
+  SECRET_KEY: ci-test-secret-key
+  API_ACCESS_TOKEN: ci-test-api-access-token
+  CORS_ORIGINS: http://localhost:5173
 
 jobs:
   test:
-    name: Run tests
+    name: Test
     runs-on: ubuntu-latest
-
-    env:
-      DATABASE_URL: postgresql+asyncpg://sms_user:sms_password@127.0.0.1:5432/sms_test_db
-      SECRET_KEY: ci-test-secret-key
-      API_ACCESS_TOKEN: ci-test-api-access-token
-      CORS_ORIGINS: http://localhost:5173
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install and start PostgreSQL
+      - name: Start PostgreSQL
         run: bash .github/scripts/setup-postgres.sh
 
       - uses: actions/setup-python@v5
@@ -52,18 +48,18 @@ jobs:
       - name: Frontend build
         working-directory: frontend
         env:
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
-          VITE_API_ACCESS_TOKEN: ${{ secrets.API_ACCESS_TOKEN }}
+          VITE_API_URL: http://localhost:8000/api/v1
+          VITE_API_ACCESS_TOKEN: ci-test-api-access-token
         run: |
           npm ci
+          npm run lint
           npm run build
 
-  deploy-frontend:
-    name: Frontend → S3 + CloudFront
+  deploy:
+    name: Deploy to EC2
     needs: test
     runs-on: ubuntu-latest
     environment: production
-
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +69,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build React app
+      - name: Build frontend
         working-directory: frontend
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
@@ -82,197 +78,35 @@ jobs:
           npm ci
           npm run build
 
-      - name: Check frontend deploy config
-        run: |
-          missing=0
-          if [ -z "${{ vars.S3_BUCKET }}" ]; then
-            echo "Missing GitHub Variable: S3_BUCKET (Settings → Variables → Actions)"
-            missing=1
-          else
-            echo "S3_BUCKET=${{ vars.S3_BUCKET }}"
-          fi
-          if [ -z "${{ vars.VITE_API_URL }}" ]; then
-            echo "VITE_API_URL is not set; frontend will keep the local API fallback until you add it"
-          else
-            echo "VITE_API_URL=${{ vars.VITE_API_URL }}"
-          fi
-          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
-            echo "Missing GitHub Secrets: AWS_ACCESS_KEY_ID and/or AWS_SECRET_ACCESS_KEY"
-            missing=1
-          fi
-          exit "$missing"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Verify S3 bucket access
-        run: aws s3 ls "s3://${{ vars.S3_BUCKET }}/"
-
-      - name: Sync to S3
-        run: |
-          aws s3 sync frontend/dist/ s3://${{ vars.S3_BUCKET }}/ \
-            --delete \
-            --cache-control "public,max-age=31536000,immutable" \
-            --exclude "index.html" \
-            --exclude "*.html"
-          aws s3 sync frontend/dist/ s3://${{ vars.S3_BUCKET }}/ \
-            --cache-control "public,max-age=0,must-revalidate" \
-            --exclude "*" \
-            --include "*.html"
-
-      - name: Invalidate CloudFront cache
-        if: vars.CLOUDFRONT_DISTRIBUTION_ID != ''
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"
-
-  deploy-backend:
-    name: Backend → EC2
-    needs: test
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check backend deploy config
-        run: |
-          missing=0
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
-            echo "Missing GitHub Secret: EC2_HOST (EC2 public IP or DNS)"
-            missing=1
-          fi
-          if [ -z "${{ secrets.EC2_USER }}" ]; then
-            echo "Missing GitHub Secret: EC2_USER (usually ubuntu)"
-            missing=1
-          fi
-          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
-            echo "Missing GitHub Secret: EC2_SSH_KEY (full private PEM, including BEGIN/END lines)"
-            missing=1
-          fi
-          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
-            echo "Missing GitHub Secret: DATABASE_URL (RDS connection string)"
-            missing=1
-          fi
-          exit "$missing"
-
-      - name: Prepare EC2 app directory
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            sudo mkdir -p /opt/sms
-            sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/sms
-            sudo apt-get update -qq
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip curl rsync rsync
-
-      - name: Copy backend to EC2
+      - name: Upload backend and config
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "backend"
-          target: "/tmp/sms-upload"
-          rm: true
+          source: "backend,infra/ec2"
+          target: "/tmp/sms-staging"
 
-      - name: Copy systemd unit
+      - name: Upload frontend build
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "infra/ec2/sms-api.service"
-          target: "/tmp"
-          strip_components: 2
+          source: "frontend/dist"
+          target: "/tmp/sms-staging/frontend"
 
-      - name: Install deps and restart API
+      - name: Install and restart on EC2
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          API_ACCESS_TOKEN: ${{ secrets.API_ACCESS_TOKEN }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DATABASE_URL,SECRET_KEY,API_ACCESS_TOKEN,CORS_ORIGINS
           command_timeout: 20m
-          script: |
-            set -euo pipefail
-            sudo mkdir -p /opt/sms
-            if [ -d /tmp/sms-upload/backend ]; then
-              SRC=/tmp/sms-upload/backend/
-            else
-              SRC=/tmp/sms-upload/
-            fi
-            echo "Using upload source: $SRC"
-            ls -la "$SRC"
-            sudo rsync -a --delete --exclude venv --exclude .env "$SRC" /opt/sms/
-            sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/sms
-            test -f /opt/sms/app/main.py
-            test -f /opt/sms/requirements.txt
-            cd /opt/sms
-
-            DB_URL='${{ secrets.DATABASE_URL }}'
-            case "$DB_URL" in
-              postgresql+asyncpg://*) ;;
-              postgresql://*) DB_URL="postgresql+asyncpg://${DB_URL#postgresql://}" ;;
-              postgres://*) DB_URL="postgresql+asyncpg://${DB_URL#postgres://}" ;;
-            esac
-
-            printf '%s\n' \
-              "APP_NAME=School Management System" \
-              "DEBUG=false" \
-              "ALGORITHM=HS256" \
-              "ACCESS_TOKEN_EXPIRE_MINUTES=120" \
-              "DB_SCHEMA=public" \
-              "DATABASE_URL=${DB_URL}" \
-              "SECRET_KEY=${{ secrets.SECRET_KEY }}" \
-              "API_ACCESS_TOKEN=${{ secrets.API_ACCESS_TOKEN }}" \
-              "CORS_ORIGINS=${{ vars.CORS_ORIGINS }}" \
-              > .env
-
-            python3 -m venv venv
-            . venv/bin/activate
-            pip install --upgrade pip
-            pip install -r requirements.txt
-
-            UNIT_FILE=$(find /tmp -name 'sms-api.service' | head -n 1 || true)
-            if [ -z "$UNIT_FILE" ]; then
-              echo "sms-api.service was not uploaded to /tmp"
-              find /tmp -maxdepth 4 -type f | head
-              exit 1
-            fi
-            echo "Using unit file: $UNIT_FILE"
-            sudo cp "$UNIT_FILE" /etc/systemd/system/sms-api.service
-            sudo systemctl daemon-reload
-            sudo systemctl enable sms-api
-            sudo systemctl restart sms-api || true
-
-            ok=0
-            for i in $(seq 1 20); do
-              if curl -sf http://127.0.0.1:8000/health; then
-                echo
-                echo "API is healthy"
-                ok=1
-                break
-              fi
-              echo "Waiting for API... ($i/20)"
-              sleep 3
-            done
-            if [ "$ok" -ne 1 ]; then
-              echo "API failed to become healthy"
-              sudo systemctl status sms-api --no-pager || true
-              sudo journalctl -u sms-api -n 120 --no-pager || true
-              ./venv/bin/python -c "from app.main import app; print('import ok', app.title)" || true
-              exit 1
-            fi
-
-      - name: Deployment summary
-        run: |
-          echo "## Backend deployed to EC2" >> $GITHUB_STEP_SUMMARY
-          echo "Host: \`${{ secrets.EC2_HOST }}\`" >> $GITHUB_STEP_SUMMARY
+          script: bash /tmp/sms-staging/infra/ec2/deploy.sh

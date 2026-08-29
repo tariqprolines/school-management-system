@@ -1,107 +1,65 @@
-# Simple AWS Deployment
+# EC2 Deployment (frontend + backend)
 
 ```
-GitHub → git push → GitHub Actions
-                         │
-            ┌────────────┴────────────┐
-            ▼                         ▼
-     React + Vite               FastAPI
-            │                         │
-            ▼                         ▼
-    S3 + CloudFront              EC2 (systemd)
-                                       │
-                                       ▼
-                               PostgreSQL RDS
+GitHub push to main
+        │
+        ▼
+  GitHub Actions
+   (test → deploy)
+        │
+        ▼
+      EC2
+  ┌─────┴─────┐
+  │   nginx   │  :80  → /var/www/sms (React)
+  │           │  /api → uvicorn :8000 (FastAPI)
+  └─────┬─────┘
+        ▼
+   PostgreSQL (RDS or local)
 ```
 
-## 1. AWS resources
+## 1. One-time EC2 setup
 
-### RDS PostgreSQL
-- Engine: PostgreSQL 15
-- Database: `sms_db`
-- Note the endpoint and credentials
+Ubuntu 22.04+, security group: **22** (SSH), **80/443** (HTTP/S).
 
-Connection string for GitHub secret `DATABASE_URL`:
-```
-postgresql+asyncpg://USER:PASSWORD@your-rds.xxx.rds.amazonaws.com:5432/sms_db
+```bash
+sudo bash infra/ec2/setup-server.sh
 ```
 
-### EC2 (backend)
-- Ubuntu 22.04, `t3.small` or larger
-- Security group: allow **22** (SSH), **80/443** (nginx), restrict **8000** to localhost only
-- Elastic IP recommended
-- Run one-time setup:
-  ```bash
-  sudo bash infra/ec2/setup-server.sh
-  ```
-- Configure nginx with `infra/ec2/nginx-api.conf` for `api.yourschool.com`
+Optional HTTPS after DNS points to the server:
 
-### S3 + CloudFront (frontend)
-1. Create S3 bucket (e.g. `sms-frontend-prod`)
-2. Enable static website hosting OR use CloudFront OAC
-3. Create CloudFront distribution:
-   - Origin: S3 bucket
-   - Default root object: `index.html`
-   - Custom error response: 403/404 → `/index.html` (SPA routing)
-4. Point `school.yourschool.com` CNAME to CloudFront
+```bash
+sudo certbot --nginx -d your-domain.com
+```
 
-## 2. GitHub configuration
-
-### Secrets (Settings → Secrets → Actions)
+## 2. GitHub secrets
 
 | Secret | Description |
 |--------|-------------|
-| `AWS_ACCESS_KEY_ID` | IAM user for S3 + CloudFront |
-| `AWS_SECRET_ACCESS_KEY` | IAM secret |
 | `EC2_HOST` | EC2 public IP or hostname |
 | `EC2_USER` | `ubuntu` |
-| `EC2_SSH_KEY` | Private SSH key (full PEM contents) |
-| `DATABASE_URL` | RDS connection string |
+| `EC2_SSH_KEY` | Private SSH key (full PEM) |
+| `DATABASE_URL` | `postgresql+asyncpg://USER:PASS@host:5432/sms_db` |
 | `SECRET_KEY` | JWT secret (long random string) |
-| `API_ACCESS_TOKEN` | API key (backend + Vite build) |
+| `API_ACCESS_TOKEN` | API key (backend + frontend build) |
 
-### Variables (Settings → Variables → Actions)
+## 3. GitHub variables
 
 | Variable | Example |
 |----------|---------|
-| `AWS_REGION` | `ap-south-1` |
-| `S3_BUCKET` | `sms-frontend-prod` |
-| `CLOUDFRONT_DISTRIBUTION_ID` | `E1234567890ABC` |
-| `VITE_API_URL` | `https://api.yourschool.com/api/v1` |
-| `CORS_ORIGINS` | `https://school.yourschool.com` |
+| `VITE_API_URL` | `http://YOUR_EC2_IP/api/v1` or `https://your-domain.com/api/v1` |
+| `CORS_ORIGINS` | `http://YOUR_EC2_IP` or `https://your-domain.com` |
 
-### IAM permissions (deploy user)
-- `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` on frontend bucket
-- `cloudfront:CreateInvalidation` on distribution
+## 4. Workflows
 
-## 3. Workflows
+| File | When | What |
+|------|------|------|
+| `deploy.yml` | Push to `main` | Test → SSH deploy to EC2 |
 
-| File | Trigger | What it does |
-|------|---------|--------------|
-| `.github/workflows/ci.yml` | PR / push | Tests + build verify |
-| `.github/workflows/deploy.yml` | Push to `main` | S3 sync + EC2 SSH deploy |
+Manual deploy: **Actions → Deploy → Run workflow**
 
-### Manual deploy
-**Actions → Deploy to AWS → Run workflow**
+## 5. Post-deploy checks
 
-## 4. Local development
-
-```bash
-# Backend
-cd backend && python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # edit DATABASE_URL
-uvicorn app.main:app --reload --port 8000
-
-# Frontend
-cd frontend && npm install && cp .env.example .env
-npm run dev
-```
-
-## 5. Post-deploy checklist
-
-- [ ] `https://api.yourschool.com/health` returns 200
-- [ ] `https://school.yourschool.com` loads login page
-- [ ] `CORS_ORIGINS` matches CloudFront domain
-- [ ] RDS security group allows EC2 only
-- [ ] HTTPS on both domains (certbot / ACM)
+- [ ] `http://YOUR_EC2_IP/` loads the login page
+- [ ] `http://YOUR_EC2_IP/health` returns `{"status":"healthy",...}`
+- [ ] `CORS_ORIGINS` matches the URL users open in the browser
+- [ ] `VITE_API_URL` uses the same host with `/api/v1` path

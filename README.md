@@ -97,20 +97,19 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-## CI/CD (GitHub Actions → AWS)
+## CI/CD (GitHub Actions → EC2)
 
-Simple deployment:
+Both frontend and backend deploy to the same EC2 instance (nginx + systemd).
 
 | Component | Target |
 |-----------|--------|
-| React + Vite | **S3 + CloudFront** |
-| FastAPI | **EC2** (systemd + uvicorn) |
-| PostgreSQL | **RDS** |
+| React + Vite | **EC2** `/var/www/sms` (nginx static) |
+| FastAPI | **EC2** `/opt/sms` (systemd + uvicorn) |
+| PostgreSQL | **RDS** or local Postgres |
 
 | Workflow | File | Trigger |
 |----------|------|---------|
-| **CI** | `.github/workflows/ci.yml` | PR / push |
-| **Deploy** | `.github/workflows/deploy.yml` | Push to `main` |
+| **Deploy** | `.github/workflows/deploy.yml` | Push to `main` (tests run before deploy) |
 
 Setup guide: [infra/aws/README.md](infra/aws/README.md)
 
