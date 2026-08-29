@@ -36,7 +36,7 @@ export default function LoginPage() {
           <School size={48} color="#3b82f6" />
         </div>
         <h1>School Management System</h1>
-        <p className="subtitle">Please, Sign in to your portal</p>
+        <p className="subtitle">Sign in to your portal</p>
         {error && <div className="error">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group" style={{ marginBottom: 16 }}>
