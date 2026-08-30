@@ -51,7 +51,7 @@ printf '%s\n' \
   "DATABASE_URL=${DB_URL}" \
   "SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}" \
   "API_ACCESS_TOKEN=${API_ACCESS_TOKEN:?API_ACCESS_TOKEN is required}" \
-  "CORS_ORIGINS=${CORS_ORIGINS:-http://localhost}" \
+  "CORS_ORIGINS=${CORS_ORIGINS}" \
   > .env
 
 python3 -m venv venv
