@@ -111,7 +111,30 @@ Both frontend and backend deploy to `/var/www/html/school-management-system/` on
 |----------|------|---------|
 | **Deploy** | `.github/workflows/deploy.yml` | Push to `main` (tests run before deploy) |
 
-Setup guide: [infra/aws/README.md](infra/aws/README.md)
+Setup guide: run `sudo bash infra/ec2/enable-services.sh` on EC2 after first deploy.
+
+## Run services in background (no terminal needed)
+
+| Service | How it runs | Port |
+|---------|-------------|------|
+| **Backend** | `sms-api.service` (systemd) | 8000 (internal) |
+| **Frontend** | `nginx` serves `frontend/dist` | 80 (public) |
+
+```bash
+# One-time on EC2 (from project root)
+sudo bash infra/ec2/enable-services.sh
+```
+
+**Do not** use `uvicorn ...` or `npm run dev` in a terminal for production — those stop when you close SSH.
+
+Useful commands:
+
+```bash
+sudo systemctl status sms-api nginx
+sudo systemctl restart sms-api
+sudo journalctl -u sms-api -f
+curl http://127.0.0.1/health
+```
 
 ## Project Structure
 

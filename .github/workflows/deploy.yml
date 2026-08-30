@@ -73,7 +73,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
-          VITE_API_ACCESS_TOKEN: ${{ secrets.API_ACCESS_TOKEN }}
+          VITE_API_ACCESS_TOKEN: ${{ vars.VITE_API_ACCESS_TOKEN }}
         run: |
           npm ci
           npm run build
@@ -94,12 +94,13 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           API_ACCESS_TOKEN: ${{ secrets.API_ACCESS_TOKEN }}
+          VITE_API_ACCESS_TOKEN: ${{ vars.VITE_API_ACCESS_TOKEN }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: DATABASE_URL,SECRET_KEY,API_ACCESS_TOKEN,CORS_ORIGINS,VITE_API_URL
+          envs: DATABASE_URL,SECRET_KEY,API_ACCESS_TOKEN,VITE_API_ACCESS_TOKEN,CORS_ORIGINS,VITE_API_URL
           command_timeout: 20m
           script: bash /tmp/sms-staging/infra/ec2/deploy.sh

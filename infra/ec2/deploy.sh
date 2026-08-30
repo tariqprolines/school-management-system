@@ -24,9 +24,14 @@ sudo rsync -a --delete --exclude node_modules --exclude .env --exclude '.env.*' 
 sudo chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT"
 
 # Restore frontend .env for local dev/rebuilds on EC2 (not used by nginx-served dist)
+TOKEN="${API_ACCESS_TOKEN:-${VITE_API_ACCESS_TOKEN:-}}"
+if [ -z "$TOKEN" ]; then
+  echo "Missing API_ACCESS_TOKEN secret or VITE_API_ACCESS_TOKEN variable" >&2
+  exit 1
+fi
 printf '%s\n' \
   "VITE_API_URL=${VITE_API_URL:-http://localhost/api/v1}" \
-  "VITE_API_ACCESS_TOKEN=${API_ACCESS_TOKEN:?API_ACCESS_TOKEN is required}" \
+  "VITE_API_ACCESS_TOKEN=${TOKEN}" \
   > "${FRONTEND_DEST}/.env"
 sudo chown "$DEPLOY_USER:$DEPLOY_USER" "${FRONTEND_DEST}/.env"
 
@@ -50,16 +55,20 @@ printf '%s\n' \
   "DB_SCHEMA=public" \
   "DATABASE_URL=${DB_URL}" \
   "SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}" \
-  "API_ACCESS_TOKEN=${API_ACCESS_TOKEN:?API_ACCESS_TOKEN is required}" \
-  "CORS_ORIGINS=${CORS_ORIGINS}" \
+  "API_ACCESS_TOKEN=${TOKEN}" \
+  "CORS_ORIGINS=${CORS_ORIGINS:-${VITE_API_URL%/api/v1}}" \
   > .env
 
-python3 -m venv venv
+if [ ! -x venv/bin/uvicorn ]; then
+  python3 -m venv venv
+fi
 . venv/bin/activate
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 
 sudo cp "${STAGING}/infra/ec2/sms-api.service" /etc/systemd/system/sms-api.service
+sudo systemctl stop school-management-system.service 2>/dev/null || true
+sudo systemctl disable school-management-system.service 2>/dev/null || true
 if [ -f "${STAGING}/infra/ec2/nginx.conf" ]; then
   sudo cp "${STAGING}/infra/ec2/nginx.conf" /etc/nginx/sites-available/sms
   sudo ln -sf /etc/nginx/sites-available/sms /etc/nginx/sites-enabled/sms
@@ -67,16 +76,18 @@ if [ -f "${STAGING}/infra/ec2/nginx.conf" ]; then
 fi
 
 sudo systemctl daemon-reload
-sudo systemctl enable sms-api
+sudo systemctl enable sms-api nginx
 sudo systemctl restart sms-api
 sudo nginx -t
 sudo systemctl reload nginx
 
 for i in $(seq 1 20); do
   if curl -sf http://127.0.0.1:8000/health >/dev/null; then
+    curl -sf http://127.0.0.1/health >/dev/null || { echo "nginx proxy to /health failed"; exit 1; }
     echo "Deploy complete"
     echo "  Backend:  ${BACKEND_DEST}"
     echo "  Frontend: ${FRONTEND_DEST} (nginx serves ${FRONTEND_DEST}/dist)"
+    echo "  API URL:  ${VITE_API_URL:-not set}"
     exit 0
   fi
   echo "Waiting for API... ($i/20)"
